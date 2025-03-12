@@ -1,36 +1,42 @@
 #![no_std]
 
 use pc_keyboard::{DecodedKey, KeyCode};
-use pluggable_interrupt_os::vga_buffer::{plot, Color, ColorCode};
-
-
-
+use pluggable_interrupt_os::vga_buffer::{plot, Color, ColorCode, BUFFER_WIDTH, BUFFER_HEIGHT};
 
     pub struct Room {
         pub width: usize,
         pub height: usize,
+        pub x: usize,
+        pub y: usize,
     }
 
     impl Room {
         pub fn new(width: usize, height: usize) -> Self {
-            Self { width, height }
+            let x = (BUFFER_WIDTH - width) / 2;
+            let y = (BUFFER_HEIGHT - height) / 2;
+            Self { width, height, x, y }
         }
 
         pub fn draw(&self) {
-            for y in 0..self.height {
-                for x in 0..self.width {
-                    let ch = if x == 0 || x == self.width - 1 || y == 0 || y == self.height - 1 {
-                        '#' // Walls
-                    } else {
-                        '.' // Floor
-                    };
-                    plot(ch, x, y, ColorCode::new(Color::White, Color::Black));
+            for col in self.x..self.x + self.width {
+                plot('#', col, self.y, ColorCode::new(Color::White, Color::Black)); // Top wall
+                plot('#', col, self.y + self.height - 1, ColorCode::new(Color::White, Color::Black)); // Bottom wall
+            }
+
+            for row in self.y..self.y + self.height {
+                plot('#', self.x, row, ColorCode::new(Color::White, Color::Black)); // Left wall
+                plot('#', self.x + self.width - 1, row, ColorCode::new(Color::White, Color::Black)); // Right wall
+            }
+
+            for row in (self.y + 1)..(self.y + self.height - 1) {
+                for col in (self.x + 1)..(self.x + self.width - 1) {
+                    plot('.', col, row, ColorCode::new(Color::DarkGray, Color::Black)); // Floor
                 }
             }
         }
 
         pub fn is_wall(&self, x: usize, y: usize) -> bool {
-            x == 0 || x == self.width - 1 || y == 0 || y == self.height - 1
+            x == self.x || x == self.x + self.width - 1 || y == self.y || y == self.y + self.height - 1
         }
     }
 
@@ -65,8 +71,11 @@ use pluggable_interrupt_os::vga_buffer::{plot, Color, ColorCode};
             }
         }
 
-        pub fn new(start_x: usize, start_y: usize) -> Self {
-            Self { x: start_x, y: start_y }
+        pub fn new(room: &Room) -> Self {
+            Self {
+                x: room.x + room.width / 2,
+                y: room.y + room.height / 2,
+            }
         }
 
         pub fn draw(&self) {
@@ -80,6 +89,33 @@ use pluggable_interrupt_os::vga_buffer::{plot, Color, ColorCode};
                 self.y = new_y;
             }
         }
+    }
+
+    pub struct Mouse {
+        pub x: usize,
+        pub y: usize,
+    }
+
+    impl Mouse {
+
+        pub fn new(room: &Room) -> Self {
+            Self {
+                x: room.x + 5,
+                y: room.y + 5,
+            }
+        }
+
+        pub fn draw(&self) {
+            plot('~', self.x, self.y, ColorCode::new(Color::Yellow, Color::Black));
+            plot('o', self.x + 1, self.y, ColorCode::new(Color::Yellow, Color::Black));
+        }
+
+        pub fn move_to(&mut self, new_x: usize, new_y: usize, room: &Room) {
+            if !room.is_wall(new_x, new_y) && !room.is_wall(new_x + 1, new_y) {
+                self.x = new_x;
+                self.y = new_y;
+            }
+        }
+    }
 
 
-}
