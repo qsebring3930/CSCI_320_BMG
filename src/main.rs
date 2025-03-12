@@ -30,10 +30,11 @@ fn cpu_loop() -> ! {
 
     loop {
         if let Ok(_) = TICKED.compare_exchange(true, false) {
-            mouse.random_move(&room, &player);
+            mouse.random_move(&room, &mut player);
             room.draw();
             mouse.draw();
-            player.draw();
+            player.update();
+            player.update_bullets(&room, &mut mouse);
         }
 
         if let Ok(k) = LAST_KEY.fetch_update(|k| if k.is_some() { Some(None) } else { None }) {
