@@ -30,6 +30,7 @@ fn cpu_loop() -> ! {
 
     loop {
         if let Ok(_) = TICKED.compare_exchange(true, false) {
+            mouse.random_move(&room, &player);
             room.draw();
             mouse.draw();
             player.draw();
@@ -37,7 +38,7 @@ fn cpu_loop() -> ! {
 
         if let Ok(k) = LAST_KEY.fetch_update(|k| if k.is_some() { Some(None) } else { None }) {
             if let Some(k) = k {
-                player.key(k, &room);
+                player.key(k, &room, &mouse);
             }
         }
     }
