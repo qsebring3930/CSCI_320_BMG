@@ -1,7 +1,7 @@
 #![no_std]
 
 use pc_keyboard::{DecodedKey, KeyCode};
-use pluggable_interrupt_os::vga_buffer::{plot, Color, ColorCode, BUFFER_WIDTH, BUFFER_HEIGHT};
+use pluggable_interrupt_os::{println, serial_println, vga_buffer::{plot, Color, ColorCode, BUFFER_HEIGHT, BUFFER_WIDTH}};
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 
 use core::{
@@ -63,6 +63,7 @@ use core::{
         pub fn key(&mut self, key: DecodedKey, room: &Room, mouse: &Mouse) {
             match key {
                 DecodedKey::RawKey(code) => self.handle_raw(code, room, mouse),
+                DecodedKey::Unicode(c) => self.handle_unicode(c),
                 _ => {}
             }
         }
@@ -74,6 +75,24 @@ use core::{
 
         pub fn timer(&mut self) {
             self.timer += 1;
+        }
+
+        fn handle_unicode(&mut self, key: char) {
+            match key {
+                'w' => {
+                    self.shoot(0, -1); // Shoot Up
+                }
+                'a' => {
+                    self.shoot(-1, 0); // Shoot Left
+                }
+                's' => {
+                    self.shoot(0, 1); // Shoot Down
+                }
+                'd' => {
+                    self.shoot(1, 0); // Shoot Right
+                }
+                _ => {}
+            }
         }
 
         fn handle_raw(&mut self, key: KeyCode, room: &Room, mouse: &Mouse) {
@@ -90,48 +109,27 @@ use core::{
                 KeyCode::ArrowDown => {
                     self.move_to(self.x, self.y + 1, room, mouse);
                 }
-                KeyCode::W => {
-                    self.shoot(0, -1); // Shoot Up
-                }
-                KeyCode::A => {
-                    self.shoot(-1, 0); // Shoot Left
-                }
-                KeyCode::S => {
-                    self.shoot(0, 1); // Shoot Down
-                }
-                KeyCode::D => {
-                    self.shoot(1, 0); // Shoot Right
-                }
                 _ => {}
             }
         }
 
         pub fn shoot(&mut self, dx: isize, dy:isize) {
             if self.i_bullet < 10 {
-                self.bullets[self.i_bullet] = Bullet::new(self.x, self.y, dx, dy, true);
+                self.bullets[self.i_bullet] = Bullet::new(self.x, self.y, dx, dy, true); // Ensure bullet is active
                 self.i_bullet += 1;
             } else {
-                self.i_bullet = 0; // Reset index to reuse old bullets
+                self.i_bullet = 0;
             }
         }
 
         pub fn update_bullets(&mut self, room: &Room, mouse: &mut Mouse) {
-            let mut new_bullets = [Bullet::new(0, 0, 0, 0, false); 10]; // Temporary array
-            let mut new_count = 0;
 
             for bullet in &mut self.bullets {
                 bullet.clear();
                 bullet.move_forward(room, mouse);
                 bullet.draw();
-
-                if bullet.active && new_count < 10 {
-                    new_bullets[new_count] = *bullet;
-                    new_count += 1;
-                }
             }
 
-            self.bullets = new_bullets;
-            self.i_bullet = new_count; // Update the index to track active bullets
         }
 
         pub fn new(room: &Room) -> Self {
@@ -177,6 +175,9 @@ use core::{
                 self.y = new_y;
             }
             if mouse.is_collision(new_x, new_y) || mouse.is_collision(new_x + 1, new_y) {
+                if mouse.dead {
+                    return;
+                }
                 if self.health > 0 && (self.timer - self.last_hit > 8){
                     self.health -= 1;
                     self.last_hit = self.timer;
@@ -210,14 +211,18 @@ use core::{
         }
 
         pub fn die(&mut self) {
-            self.x = 999; // Move off-screen (or implement a better respawn)
-            self.y = 999;
             self.dead = true;
         }
 
         pub fn draw(&self) {
-            plot('~', self.x, self.y, ColorCode::new(Color::Yellow, Color::Black));
-            plot('o', self.x + 1, self.y, ColorCode::new(Color::Yellow, Color::Black));
+            if !self.dead {
+                plot('~', self.x, self.y, ColorCode::new(Color::Yellow, Color::Black));
+                plot('o', self.x + 1, self.y, ColorCode::new(Color::Yellow, Color::Black));
+            } else {
+                plot('O', self.x, self.y, ColorCode::new(Color::Yellow, Color::Black));
+                plot('X', self.x + 1, self.y, ColorCode::new(Color::Yellow, Color::Black));
+            }
+
         }
 
         pub fn random_move(&mut self, room: &Room, player: &mut Player) {
@@ -246,6 +251,9 @@ use core::{
                 self.y = new_y;
             }
             if player.is_collision(new_x, new_y) || player.is_collision(new_x + 1, new_y) {
+                if self.dead {
+                    return;
+                }
                 if player.health > 0 && (player.timer - player.last_hit > 8){
                     player.health -= 1;
                     player.last_hit = self.timer;
@@ -279,7 +287,7 @@ use core::{
                 let new_y = self.y.saturating_add_signed(self.dy);
 
                 if room.is_wall(new_x, new_y) {
-                    self.active = false; // Bullet disappears if it hits a wall
+                    self.active = false;
                 } else {
                     self.x = new_x;
                     self.y = new_y;
@@ -287,7 +295,7 @@ use core::{
 
                 if mouse.is_collision(self.x, self.y) {
                     self.active = false;
-                    mouse.die(); // Mouse dies if hit
+                    mouse.die();
                 }
             }
         }
