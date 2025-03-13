@@ -10,42 +10,98 @@ use core::{
     prelude::rust_2024::derive,
 };
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-
     pub struct Room {
         pub width: usize,
         pub height: usize,
         pub x: usize,
         pub y: usize,
+        pub doors: [(usize, usize); 4], // Up to 4 doors
+        pub locked: bool, // Doors lock when enemies are present
+        pub seed: SmallRng,
     }
 
     impl Room {
         pub fn new(width: usize, height: usize) -> Self {
             let x = (BUFFER_WIDTH - width) / 2;
             let y = (BUFFER_HEIGHT - height) / 2;
-            Self { width, height, x, y }
+
+            let mut seed = SmallRng::seed_from_u64(unsafe { core::arch::x86_64::_rdtsc() });
+
+            let mut doors = [(0, 0); 4];
+            let door_count = seed.gen_range(2..=4);
+
+            for i in 0..door_count {
+                match seed.gen_range(0..4) {
+                    0 => doors[i] = (x + seed.gen_range(1..width - 1), y),           // Top wall
+                    1 => doors[i] = (x + seed.gen_range(1..width - 1), y + height - 1), // Bottom wall
+                    2 => doors[i] = (x, y + seed.gen_range(1..height - 1)),           // Left wall
+                    3 => doors[i] = (x + width - 1, y + seed.gen_range(1..height - 1)), // Right wall
+                    _ => {}
+                }
+            }
+
+            Self { width, height, x, y, doors, locked: false, seed }
         }
 
         pub fn draw(&self) {
             for col in self.x..self.x + self.width {
-                plot('#', col, self.y, ColorCode::new(Color::White, Color::Black)); // Top wall
-                plot('#', col, self.y + self.height - 1, ColorCode::new(Color::White, Color::Black)); // Bottom wall
+                plot('#', col, self.y, ColorCode::new(Color::White, Color::Black));
+                plot('#', col, self.y + self.height - 1, ColorCode::new(Color::White, Color::Black));
             }
 
             for row in self.y..self.y + self.height {
-                plot('#', self.x, row, ColorCode::new(Color::White, Color::Black)); // Left wall
-                plot('#', self.x + self.width - 1, row, ColorCode::new(Color::White, Color::Black)); // Right wall
+                plot('#', self.x, row, ColorCode::new(Color::White, Color::Black));
+                plot('#', self.x + self.width - 1, row, ColorCode::new(Color::White, Color::Black));
             }
 
             for row in (self.y + 1)..(self.y + self.height - 1) {
                 for col in (self.x + 1)..(self.x + self.width - 1) {
-                    plot('.', col, row, ColorCode::new(Color::DarkGray, Color::Black)); // Floor
+                    plot('.', col, row, ColorCode::new(Color::DarkGray, Color::Black));
+                }
+            }
+
+            let door_color = if self.locked { Color::Red } else { Color::Green };
+
+            for &(dx, dy) in &self.doors {
+                if dx != 0 || dy != 0 {
+                    plot('+', dx, dy, ColorCode::new(door_color, Color::Black));
+                }
+            }
+        }
+
+        pub fn clear(&self) {
+            for col in self.x..self.x + self.width {
+                plot(' ', col, self.y, ColorCode::new(Color::White, Color::Black));
+                plot(' ', col, self.y + self.height - 1, ColorCode::new(Color::White, Color::Black));
+            }
+
+            for row in self.y..self.y + self.height {
+                plot(' ', self.x, row, ColorCode::new(Color::White, Color::Black));
+                plot(' ', self.x + self.width - 1, row, ColorCode::new(Color::White, Color::Black));
+            }
+
+            for row in (self.y + 1)..(self.y + self.height - 1) {
+                for col in (self.x + 1)..(self.x + self.width - 1) {
+                    plot(' ', col, row, ColorCode::new(Color::DarkGray, Color::Black));
                 }
             }
         }
 
         pub fn is_wall(&self, x: usize, y: usize) -> bool {
             x == self.x || x == self.x + self.width - 1 || y == self.y || y == self.y + self.height - 1
+        }
+
+        pub fn is_door(&self, x: usize, y: usize) -> bool {
+            for &(dx, dy) in &self.doors {
+                if (x, y) == (dx, dy) {
+                    return true;
+                }
+            }
+            false
+        }
+
+        pub fn unlock(&mut self) {
+            self.locked = false;
         }
     }
 
@@ -60,16 +116,14 @@ use core::{
     }
 
     impl Player {
-        pub fn key(&mut self, key: DecodedKey, room: &Room, mouse: &Mouse) {
+        pub fn key(&mut self, key: DecodedKey, mouse: &Mouse, game_state: &mut GameState) {
             match key {
-                DecodedKey::RawKey(code) => self.handle_raw(code, room, mouse),
+                DecodedKey::RawKey(code) => self.handle_raw(code, mouse, game_state),
                 DecodedKey::Unicode(c) => self.handle_unicode(c),
-                _ => {}
             }
         }
 
         pub fn update(&mut self) {
-            self.draw();
             self.timer();
         }
 
@@ -95,19 +149,19 @@ use core::{
             }
         }
 
-        fn handle_raw(&mut self, key: KeyCode, room: &Room, mouse: &Mouse) {
+        fn handle_raw(&mut self, key: KeyCode, mouse: &Mouse, game_state: &mut GameState) {
             match key {
                 KeyCode::ArrowLeft => {
-                    self.move_to(self.x.saturating_sub(1), self.y, room, mouse);
+                    self.move_to(self.x.saturating_sub(1), self.y, mouse, game_state);
                 }
                 KeyCode::ArrowRight => {
-                    self.move_to(self.x + 1, self.y, room, mouse);
+                    self.move_to(self.x + 1, self.y, mouse, game_state);
                 }
                 KeyCode::ArrowUp => {
-                    self.move_to(self.x, self.y.saturating_sub(1), room, mouse);
+                    self.move_to(self.x, self.y.saturating_sub(1), mouse, game_state);
                 }
                 KeyCode::ArrowDown => {
-                    self.move_to(self.x, self.y + 1, room, mouse);
+                    self.move_to(self.x, self.y + 1, mouse, game_state);
                 }
                 _ => {}
             }
@@ -169,8 +223,12 @@ use core::{
             }
         }
 
-        pub fn move_to(&mut self, new_x: usize, new_y: usize, room: &Room, mouse: &Mouse) {
-            if !room.is_wall(new_x, new_y) && !room.is_wall(new_x + 1, new_y) && !mouse.is_collision(new_x, new_y) && !mouse.is_collision(new_x + 1, new_y){
+        pub fn move_to(&mut self, new_x: usize, new_y: usize, mouse: &Mouse, game_state: &mut GameState) {
+            if game_state.current_room.is_door(new_x, new_y)  {
+                //println!("thats a fuckin door");
+                game_state.transition();
+            }
+            if !game_state.current_room.is_wall(new_x, new_y) && !game_state.current_room.is_wall(new_x + 1, new_y) && !mouse.is_collision(new_x, new_y) && !mouse.is_collision(new_x + 1, new_y){
                 self.x = new_x;
                 self.y = new_y;
             }
@@ -310,6 +368,30 @@ use core::{
             if self.active {
                 plot(' ', self.x, self.y, ColorCode::new(Color::Black, Color::Black));
             }
+        }
+    }
+
+    pub struct GameState {
+        pub current_room: Room,
+        pub rng: SmallRng,
+    }
+
+    impl GameState {
+        pub fn new() -> Self {
+            let rng = SmallRng::seed_from_u64(unsafe { core::arch::x86_64::_rdtsc() });
+            let initial_room = Room::new(20, 20);
+            Self { current_room: initial_room, rng }
+        }
+
+        pub fn transition(&mut self) {
+            self.current_room.clear();
+            self.current_room = Room::new(20, 20);
+        }
+
+        pub fn update(&mut self, player: &mut Player) {
+            self.current_room.draw();
+            //println!("door {:?}, player {x}, {y}", self.current_room.doors[0], x = player.x, y = player.y);
+            player.draw();
         }
     }
 
