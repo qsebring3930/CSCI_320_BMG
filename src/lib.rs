@@ -1,7 +1,7 @@
 #![no_std]
 
 use pc_keyboard::{DecodedKey, KeyCode};
-use pluggable_interrupt_os::{println, serial_println, vga_buffer::{plot, Color, ColorCode, BUFFER_HEIGHT, BUFFER_WIDTH}};
+use pluggable_interrupt_os::{println, serial_println, vga_buffer::{plot, plot_str, plot_num, Color, ColorCode, BUFFER_HEIGHT, BUFFER_WIDTH}};
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 
 use core::{
@@ -18,6 +18,7 @@ use core::{
         pub doors: [(usize, usize); 4], // Up to 4 doors
         pub locked: bool, // Doors lock when enemies are present
         pub seed: SmallRng,
+
     }
 
     impl Room {
@@ -40,7 +41,7 @@ use core::{
                 }
             }
 
-            Self { width, height, x, y, doors, locked: false, seed }
+            Self { width, height, x, y, doors, locked: false, seed}
         }
 
         pub fn draw(&self) {
@@ -93,7 +94,7 @@ use core::{
 
         pub fn is_door(&self, x: usize, y: usize) -> bool {
             for &(dx, dy) in &self.doors {
-                if (x, y) == (dx, dy) {
+                if (x, y) == (dx, dy) || (x + 1, y) == (dx, dy) || (x, y + 1) == (dx, dy) || (x + 1, y + 1) == (dx, dy){
                     return true;
                 }
             }
@@ -116,9 +117,9 @@ use core::{
     }
 
     impl Player {
-        pub fn key(&mut self, key: DecodedKey, mouse: &Mouse, game_state: &mut GameState) {
+        pub fn key(&mut self, key: DecodedKey, game_state: &mut GameState) {
             match key {
-                DecodedKey::RawKey(code) => self.handle_raw(code, mouse, game_state),
+                DecodedKey::RawKey(code) => self.handle_raw(code, game_state),
                 DecodedKey::Unicode(c) => self.handle_unicode(c),
             }
         }
@@ -149,19 +150,19 @@ use core::{
             }
         }
 
-        fn handle_raw(&mut self, key: KeyCode, mouse: &Mouse, game_state: &mut GameState) {
+        fn handle_raw(&mut self, key: KeyCode, game_state: &mut GameState) {
             match key {
                 KeyCode::ArrowLeft => {
-                    self.move_to(self.x.saturating_sub(1), self.y, mouse, game_state);
+                    self.move_to(self.x.saturating_sub(1), self.y, game_state);
                 }
                 KeyCode::ArrowRight => {
-                    self.move_to(self.x + 1, self.y, mouse, game_state);
+                    self.move_to(self.x + 1, self.y, game_state);
                 }
                 KeyCode::ArrowUp => {
-                    self.move_to(self.x, self.y.saturating_sub(1), mouse, game_state);
+                    self.move_to(self.x, self.y.saturating_sub(1), game_state);
                 }
                 KeyCode::ArrowDown => {
-                    self.move_to(self.x, self.y + 1, mouse, game_state);
+                    self.move_to(self.x, self.y + 1, game_state);
                 }
                 _ => {}
             }
@@ -176,11 +177,11 @@ use core::{
             }
         }
 
-        pub fn update_bullets(&mut self, room: &Room, mouse: &mut Mouse) {
+        pub fn update_bullets(&mut self, game_state: &mut GameState) {
 
             for bullet in &mut self.bullets {
                 bullet.clear();
-                bullet.move_forward(room, mouse);
+                bullet.move_forward(game_state);
                 bullet.draw();
             }
 
@@ -223,22 +224,31 @@ use core::{
             }
         }
 
-        pub fn move_to(&mut self, new_x: usize, new_y: usize, mouse: &Mouse, game_state: &mut GameState) {
+        pub fn move_to(&mut self, new_x: usize, new_y: usize, game_state: &mut GameState) {
+            let mut canmove = false;
             if game_state.current_room.is_door(new_x, new_y)  {
-                //println!("thats a fuckin door");
                 game_state.transition();
+                self.clear();
             }
-            if !game_state.current_room.is_wall(new_x, new_y) && !game_state.current_room.is_wall(new_x + 1, new_y) && !mouse.is_collision(new_x, new_y) && !mouse.is_collision(new_x + 1, new_y){
-                self.x = new_x;
-                self.y = new_y;
-            }
-            if mouse.is_collision(new_x, new_y) || mouse.is_collision(new_x + 1, new_y) {
-                if mouse.dead {
-                    return;
+            if !game_state.current_room.is_wall(new_x, new_y) && !game_state.current_room.is_wall(new_x + 1, new_y) {
+                for enemy in game_state.enemies {
+                    if enemy.is_collision(new_x, new_y) || enemy.is_collision(new_x + 1, new_y) {
+                        canmove = false;
+                    } else {
+                        canmove = true;
+                    }
                 }
-                if self.health > 0 && (self.timer - self.last_hit > 8){
-                    self.health -= 1;
-                    self.last_hit = self.timer;
+                if canmove {
+                    self.x = new_x;
+                    self.y = new_y;
+                }
+            }
+            for enemy in game_state.enemies {
+                if enemy.is_collision(new_x, new_y) || enemy.is_collision(new_x + 1, new_y) {
+                    if self.health > 0 && (self.timer - self.last_hit > 8){
+                        self.health -= 1;
+                        self.last_hit = self.timer;
+                    }
                 }
             }
         }
@@ -246,25 +256,30 @@ use core::{
         pub fn is_collision(&self, x: usize, y: usize) -> bool {
             (x == self.x || x == self.x + 1) && y == self.y
         }
-    }
 
+        pub fn clear(&mut self) {
+            for bullet in &mut self.bullets {
+                bullet.clear();
+                bullet.active = false;
+            }
+        }
+    }
+    #[derive(Copy, Clone, Eq, PartialEq)]
     pub struct Mouse {
         pub x: usize,
         pub y: usize,
-        seed: SmallRng,
-        timer: usize,
-        dead: bool,
+        pub dead: bool,
+        pub active: bool,
     }
 
     impl Mouse {
 
-        pub fn new(room: &Room) -> Self {
+        pub fn new(x: usize, y: usize, dead: bool, active: bool) -> Self {
             Self {
-                x: room.x + 5,
-                y: room.y + 5,
-                seed: SmallRng::seed_from_u64(unsafe { core::arch::x86_64::_rdtsc() }),
-                timer: 0,
-                dead: false,
+                dead: dead,
+                x: x,
+                y: y,
+                active: active,
             }
         }
 
@@ -283,11 +298,16 @@ use core::{
 
         }
 
-        pub fn random_move(&mut self, room: &Room, player: &mut Player) {
+        pub fn clear(&self) {
+            if self.active {
+                plot(' ', self.x, self.y, ColorCode::new(Color::Black, Color::Black));
+            }
+        }
+
+        pub fn random_move(&mut self, room: &mut Room, player: &mut Player, timer: usize) {
             if !self.dead {
-                self.timer += 1;
-                if self.timer % 5 == 0 {
-                    let (dx, dy) = match self.seed.gen_range(0..4) {
+                if timer % 5 == 0 {
+                    let (dx, dy) = match room.seed.gen_range(0..4) {
                         0 => (-1, 0),
                         1 => (1, 0),
                         2 => (0, -1),
@@ -298,12 +318,12 @@ use core::{
                     let new_x = self.x.saturating_add_signed(dx);
                     let new_y = self.y.saturating_add_signed(dy);
 
-                    self.move_to(new_x, new_y, room, player);
+                    self.move_to(new_x, new_y, room, player, timer);
                 }
             }
         }
 
-        pub fn move_to(&mut self, new_x: usize, new_y: usize, room: &Room, player: &mut Player) {
+        pub fn move_to(&mut self, new_x: usize, new_y: usize, room: &Room, player: &mut Player, timer: usize) {
             if !room.is_wall(new_x, new_y) && !room.is_wall(new_x + 1, new_y) && !player.is_collision(new_x, new_y) && !player.is_collision(new_x + 1, new_y){
                 self.x = new_x;
                 self.y = new_y;
@@ -314,7 +334,7 @@ use core::{
                 }
                 if player.health > 0 && (player.timer - player.last_hit > 8){
                     player.health -= 1;
-                    player.last_hit = self.timer;
+                    player.last_hit = timer;
                 }
             }
         }
@@ -339,21 +359,26 @@ use core::{
             Self { x, y, dx, dy, active }
         }
 
-        pub fn move_forward(&mut self, room: &Room, mouse: &mut Mouse) {
+        pub fn move_forward(&mut self, gamestate: &mut GameState) {
             if self.active {
                 let new_x = self.x.saturating_add_signed(self.dx);
                 let new_y = self.y.saturating_add_signed(self.dy);
 
-                if room.is_wall(new_x, new_y) {
+                if gamestate.current_room.is_wall(new_x, new_y) {
                     self.active = false;
                 } else {
                     self.x = new_x;
                     self.y = new_y;
                 }
 
-                if mouse.is_collision(self.x, self.y) {
-                    self.active = false;
-                    mouse.die();
+                for enemy in gamestate.enemies.iter_mut() {
+                    if enemy.is_collision(self.x, self.y) {
+                        if !enemy.dead {
+                            self.active = false;
+                            enemy.die();
+                            gamestate.score += 100;
+                        }
+                    }
                 }
             }
         }
@@ -374,24 +399,55 @@ use core::{
     pub struct GameState {
         pub current_room: Room,
         pub rng: SmallRng,
+        pub timer: usize,
+        pub enemies: [Mouse; 10],
+        pub score: usize,
     }
 
     impl GameState {
         pub fn new() -> Self {
             let rng = SmallRng::seed_from_u64(unsafe { core::arch::x86_64::_rdtsc() });
             let initial_room = Room::new(20, 20);
-            Self { current_room: initial_room, rng }
+            let timer = 0;
+            let enemies = [Mouse::new(10, 10, true, false); 10];
+            let score = 0;
+            Self { current_room: initial_room, rng, timer, enemies, score}
         }
 
         pub fn transition(&mut self) {
             self.current_room.clear();
             self.current_room = Room::new(20, 20);
+            self.generate();
+        }
+
+        pub fn generate(&mut self) {
+            for i in 0..self.rng.gen_range(3..10) {
+                self.enemies[i] = Mouse::new(self.rng.gen_range(self.current_room.x+5..self.current_room.x+15),self.rng.gen_range(self.current_room.y+5..self.current_room.y+15), false, true);
+            }
+        }
+
+        pub fn draw(&mut self) {
+            let score_text = "Score:";
+            plot_str(score_text, 30, 0, ColorCode::new(Color::Blue, Color::Black));
+            plot_num(self.score as isize, 30 + score_text.len() + 1, 0, ColorCode::new(Color::Blue, Color::Black));
         }
 
         pub fn update(&mut self, player: &mut Player) {
+            for enemy in self.enemies.iter_mut() {
+                enemy.random_move(&mut self.current_room, player, self.timer);
+            }
             self.current_room.draw();
+            for enemy in self.enemies {
+                enemy.clear();
+                if enemy.active {
+                    enemy.draw();
+                }
+            }
             //println!("door {:?}, player {x}, {y}", self.current_room.doors[0], x = player.x, y = player.y);
             player.draw();
+            self.draw();
+            self.timer += 1;
+            self.score += 1;
         }
     }
 
