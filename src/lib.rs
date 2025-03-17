@@ -314,7 +314,7 @@ use core::{
 
         pub fn random_move(&mut self, room: &mut Room, player: &mut Player, timer: usize) {
             if !self.dead {
-                if timer % 5 == 0 {
+                if timer % 3 == 0 {
                     let (dx, dy) = match room.seed.gen_range(0..4) {
                         0 => (-1, 0),
                         1 => (1, 0),
@@ -408,7 +408,7 @@ use core::{
         pub current_room: Room,
         pub rng: SmallRng,
         pub timer: usize,
-        pub enemies: [Mouse; 10],
+        pub enemies: [Mouse; 20],
         pub score: usize,
         pub active: bool,
     }
@@ -418,7 +418,7 @@ use core::{
             let rng = SmallRng::seed_from_u64(unsafe { core::arch::x86_64::_rdtsc() });
             let initial_room = Room::new(20, 20);
             let timer = 0;
-            let enemies = [Mouse::new(10, 10, true, false); 10];
+            let enemies = [Mouse::new(10, 10, true, false); 20];
             let score = 0;
             let active = true;
             Self { current_room: initial_room, rng, timer, enemies, score, active}
@@ -434,8 +434,8 @@ use core::{
         }
 
         pub fn generate(&mut self) {
-            self.enemies = [Mouse::new(10, 10, true, false); 10];
-            for i in 0..self.rng.gen_range(3..10) {
+            self.enemies = [Mouse::new(10, 10, true, false); 20];
+            for i in 0..self.rng.gen_range(3..20) {
                 self.enemies[i] = Mouse::new(self.rng.gen_range(self.current_room.x+5..self.current_room.x+15),self.rng.gen_range(self.current_room.y+5..self.current_room.y+15), false, true);
             }
         }
@@ -456,7 +456,7 @@ use core::{
                 self.timer = 0;
                 self.current_room.clear();
                 self.current_room = Room::new(20, 20);
-                self.enemies = [Mouse::new(10, 10, true, false); 10];
+                self.enemies = [Mouse::new(10, 10, true, false); 20];
                 self.active = true;
                 for i in 25..60{
                     plot(' ', i, 0, ColorCode::new(Color::Red, Color::Black));
