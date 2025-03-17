@@ -120,7 +120,7 @@ use core::{
     impl Player {
         pub fn key(&mut self, key: DecodedKey, game_state: &mut GameState) {
             match key {
-                DecodedKey::RawKey(code) => self.handle_raw(code, game_state),
+                DecodedKey::RawKey(code) => self.handle_raw(code),
                 DecodedKey::Unicode(c) => self.handle_unicode(c, game_state),
             }
         }
@@ -136,16 +136,16 @@ use core::{
         fn handle_unicode(&mut self, key: char, game_state: &mut GameState) {
             match key {
                 'w' => {
-                    self.shoot(0, -1); // Shoot Up
+                    self.move_to(self.x, self.y.saturating_sub(1), game_state);
                 }
                 'a' => {
-                    self.shoot(-1, 0); // Shoot Left
+                    self.move_to(self.x.saturating_sub(1), self.y, game_state);
                 }
                 's' => {
-                    self.shoot(0, 1); // Shoot Down
+                    self.move_to(self.x, self.y + 1, game_state);
                 }
                 'd' => {
-                    self.shoot(1, 0); // Shoot Right
+                    self.move_to(self.x + 1, self.y, game_state);
                 }
                 'r' => {
                     game_state.restart(self);
@@ -154,19 +154,19 @@ use core::{
             }
         }
 
-        fn handle_raw(&mut self, key: KeyCode, game_state: &mut GameState) {
+        fn handle_raw(&mut self, key: KeyCode) {
             match key {
                 KeyCode::ArrowLeft => {
-                    self.move_to(self.x.saturating_sub(1), self.y, game_state);
+                    self.shoot(-1, 0); // Shoot Left
                 }
                 KeyCode::ArrowRight => {
-                    self.move_to(self.x + 1, self.y, game_state);
+                    self.shoot(1, 0); // Shoot Right
                 }
                 KeyCode::ArrowUp => {
-                    self.move_to(self.x, self.y.saturating_sub(1), game_state);
+                    self.shoot(0, -1); // Shoot Up
                 }
                 KeyCode::ArrowDown => {
-                    self.move_to(self.x, self.y + 1, game_state);
+                    self.shoot(0, 1); // Shoot Down
                 }
                 _ => {}
             }
@@ -231,7 +231,7 @@ use core::{
         pub fn move_to(&mut self, new_x: usize, new_y: usize, game_state: &mut GameState) {
             if game_state.active {
                 let mut canmove = false;
-                if game_state.current_room.is_door(new_x, new_y)  {
+                if game_state.current_room.is_door(new_x, new_y) && game_state.current_room.locked == false  {
                     game_state.transition();
                     self.clear();
                 }
@@ -441,6 +441,9 @@ use core::{
         }
 
         pub fn draw(&mut self) {
+            for i in 25..60{
+                plot(' ', i, 0, ColorCode::new(Color::Red, Color::Black));
+            }
             let score_text = "Score:";
             plot_str(score_text, 30, 0, ColorCode::new(Color::Blue, Color::Black));
             plot_num(self.score as isize, 30 + score_text.len() + 1, 0, ColorCode::new(Color::Blue, Color::Black));
@@ -463,6 +466,7 @@ use core::{
 
         pub fn update(&mut self, player: &mut Player) {
             if self.active {
+                let mut locked = false;
                 if player.health == 0 {
                     self.active = false;
                 }
@@ -474,13 +478,25 @@ use core::{
                     enemy.clear();
                     if enemy.active {
                         enemy.draw();
+                        if enemy.dead == false {
+                            locked = true
+                        }
                     }
+                }
+                if locked {
+                    self.current_room.locked = true;
+                } else {
+                    self.current_room.unlock();
                 }
                 //println!("door {:?}, player {x}, {y}", self.current_room.doors[0], x = player.x, y = player.y);
                 player.draw();
                 self.draw();
                 self.timer += 1;
-                self.score += 1;
+                if self.score > 0 {
+                    if self.timer % 3 == 0 {
+                        self.score -= 1;
+                    }
+                }
             } else {
                 let score_text = "Game Over, press R to restart.";
                 plot_str(score_text, 30, 0, ColorCode::new(Color::Red, Color::Black));
