@@ -96,6 +96,7 @@ use core::{
             for &(dx, dy) in &self.doors {
                 if (x, y) == (dx, dy) || (x + 1, y) == (dx, dy) || (x, y + 1) == (dx, dy) || (x + 1, y + 1) == (dx, dy){
                     return true;
+                    //println!("thats a fuckin door")
                 }
             }
             false
@@ -120,7 +121,7 @@ use core::{
         pub fn key(&mut self, key: DecodedKey, game_state: &mut GameState) {
             match key {
                 DecodedKey::RawKey(code) => self.handle_raw(code, game_state),
-                DecodedKey::Unicode(c) => self.handle_unicode(c),
+                DecodedKey::Unicode(c) => self.handle_unicode(c, game_state),
             }
         }
 
@@ -132,7 +133,7 @@ use core::{
             self.timer += 1;
         }
 
-        fn handle_unicode(&mut self, key: char) {
+        fn handle_unicode(&mut self, key: char, game_state: &mut GameState) {
             match key {
                 'w' => {
                     self.shoot(0, -1); // Shoot Up
@@ -145,6 +146,9 @@ use core::{
                 }
                 'd' => {
                     self.shoot(1, 0); // Shoot Right
+                }
+                'r' => {
+                    game_state.restart(self);
                 }
                 _ => {}
             }
@@ -225,29 +229,33 @@ use core::{
         }
 
         pub fn move_to(&mut self, new_x: usize, new_y: usize, game_state: &mut GameState) {
-            let mut canmove = false;
-            if game_state.current_room.is_door(new_x, new_y)  {
-                game_state.transition();
-                self.clear();
-            }
-            if !game_state.current_room.is_wall(new_x, new_y) && !game_state.current_room.is_wall(new_x + 1, new_y) {
-                for enemy in game_state.enemies {
-                    if enemy.is_collision(new_x, new_y) || enemy.is_collision(new_x + 1, new_y) {
-                        canmove = false;
-                    } else {
-                        canmove = true;
+            if game_state.active {
+                let mut canmove = false;
+                if game_state.current_room.is_door(new_x, new_y)  {
+                    game_state.transition();
+                    self.clear();
+                }
+                if !game_state.current_room.is_wall(new_x, new_y) && !game_state.current_room.is_wall(new_x + 1, new_y) {
+                    for enemy in game_state.enemies {
+                        if enemy.is_collision(new_x, new_y) || enemy.is_collision(new_x + 1, new_y) {
+                            canmove = false;
+                        } else {
+                            canmove = true;
+                        }
+                    }
+                    if canmove {
+                        self.x = new_x;
+                        self.y = new_y;
                     }
                 }
-                if canmove {
-                    self.x = new_x;
-                    self.y = new_y;
-                }
-            }
-            for enemy in game_state.enemies {
-                if enemy.is_collision(new_x, new_y) || enemy.is_collision(new_x + 1, new_y) {
-                    if self.health > 0 && (self.timer - self.last_hit > 8){
-                        self.health -= 1;
-                        self.last_hit = self.timer;
+                for enemy in game_state.enemies {
+                    if enemy.is_collision(new_x, new_y) || enemy.is_collision(new_x + 1, new_y) {
+                        if !enemy.dead {
+                            if self.health > 0 && (self.timer - self.last_hit > 8){
+                                self.health -= 1;
+                                self.last_hit = self.timer;
+                            }
+                        }
                     }
                 }
             }
@@ -402,6 +410,7 @@ use core::{
         pub timer: usize,
         pub enemies: [Mouse; 10],
         pub score: usize,
+        pub active: bool,
     }
 
     impl GameState {
@@ -411,16 +420,21 @@ use core::{
             let timer = 0;
             let enemies = [Mouse::new(10, 10, true, false); 10];
             let score = 0;
-            Self { current_room: initial_room, rng, timer, enemies, score}
+            let active = true;
+            Self { current_room: initial_room, rng, timer, enemies, score, active}
         }
 
         pub fn transition(&mut self) {
+            for enemy in self.enemies {
+                enemy.clear();
+            }
             self.current_room.clear();
             self.current_room = Room::new(20, 20);
             self.generate();
         }
 
         pub fn generate(&mut self) {
+            self.enemies = [Mouse::new(10, 10, true, false); 10];
             for i in 0..self.rng.gen_range(3..10) {
                 self.enemies[i] = Mouse::new(self.rng.gen_range(self.current_room.x+5..self.current_room.x+15),self.rng.gen_range(self.current_room.y+5..self.current_room.y+15), false, true);
             }
@@ -432,22 +446,45 @@ use core::{
             plot_num(self.score as isize, 30 + score_text.len() + 1, 0, ColorCode::new(Color::Blue, Color::Black));
         }
 
-        pub fn update(&mut self, player: &mut Player) {
-            for enemy in self.enemies.iter_mut() {
-                enemy.random_move(&mut self.current_room, player, self.timer);
-            }
-            self.current_room.draw();
-            for enemy in self.enemies {
-                enemy.clear();
-                if enemy.active {
-                    enemy.draw();
+        pub fn restart(&mut self, player: &mut Player) {
+            if !self.active {
+                player.health = 4;
+                self.score = 0;
+                self.timer = 0;
+                self.current_room.clear();
+                self.current_room = Room::new(20, 20);
+                self.enemies = [Mouse::new(10, 10, true, false); 10];
+                self.active = true;
+                for i in 25..60{
+                    plot(' ', i, 0, ColorCode::new(Color::Red, Color::Black));
                 }
             }
-            //println!("door {:?}, player {x}, {y}", self.current_room.doors[0], x = player.x, y = player.y);
-            player.draw();
-            self.draw();
-            self.timer += 1;
-            self.score += 1;
+        }
+
+        pub fn update(&mut self, player: &mut Player) {
+            if self.active {
+                if player.health == 0 {
+                    self.active = false;
+                }
+                for enemy in self.enemies.iter_mut() {
+                    enemy.random_move(&mut self.current_room, player, self.timer);
+                }
+                self.current_room.draw();
+                for enemy in self.enemies {
+                    enemy.clear();
+                    if enemy.active {
+                        enemy.draw();
+                    }
+                }
+                //println!("door {:?}, player {x}, {y}", self.current_room.doors[0], x = player.x, y = player.y);
+                player.draw();
+                self.draw();
+                self.timer += 1;
+                self.score += 1;
+            } else {
+                let score_text = "Game Over, press R to restart.";
+                plot_str(score_text, 30, 0, ColorCode::new(Color::Red, Color::Black));
+            }
         }
     }
 
